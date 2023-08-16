@@ -27,8 +27,29 @@ const client = new MongoClient(uri, {
 async function run() {
     try {
 
-
         const contactsCollection = client.db('contactsManagement').collection('contacts')
+
+        // contacts post
+        app.post('/contacts', async (req, res) => {
+            const contacts = req.body
+            const result = await contactsCollection.insertOne(contacts)
+            res.send(result)
+        })
+
+
+        // contacts get
+        app.get('/contacts', async (req, res) => {
+            const result = await contactsCollection.find().toArray()
+            res.send(result);
+        })
+
+        // specific email
+        app.get('/contacts/:email', async (req, res) => {
+            const queryEmail = req.params.email;
+            const query = { email: queryEmail };
+            const result = await contactsCollection.find(query).toArray();
+            res.send(result);
+        })
 
 
         // Connect the client to the server	(optional starting in v4.7)
