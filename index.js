@@ -3,7 +3,7 @@ const cors = require('cors');
 const app = express()
 require('dotenv').config()
 const port = process.env.PORT || 5000
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 
 //middleware
@@ -29,6 +29,22 @@ async function run() {
 
         const contactsCollection = client.db('contactsManagement').collection('contacts')
 
+
+        app.get('/contactsSearchByName/:text', async (req, res) => {
+            const searchText = req.params.text
+            console.log(searchText);
+
+            const result = await contactsCollection.find({
+                $or: [
+
+                    { name: { $regex: searchText, $options: "i" } },
+                ],
+
+            }).toArray()
+            res.send(result)
+        })
+
+
         // contacts post
         app.post('/contacts', async (req, res) => {
             const contacts = req.body
@@ -44,12 +60,51 @@ async function run() {
         })
 
         // specific email
-        app.get('/contacts/:email', async (req, res) => {
+        app.get('/contacts/email/:email', async (req, res) => {
             const queryEmail = req.params.email;
             const query = { email: queryEmail };
             const result = await contactsCollection.find(query).toArray();
             res.send(result);
         })
+
+
+        app.delete('/contacts/:id', async (req, res) => {
+            const id = req.params.id
+            const query = { _id: new ObjectId(id) }
+            const result = await contactsCollection.deleteOne(query)
+            res.send(result)
+        })
+
+        // get id
+        app.get('/contacts/:id', async (req, res) => {
+            const id = req.params.id
+            const query = { _id: new ObjectId(id) }
+            const result = await contactsCollection.findOne(query)
+            res.send(result)
+        })
+
+
+        //contacts update
+        app.put('/contacts/:id', async (req, res) => {
+            const id = req.params.id
+            const user = req.body
+            const filter = { _id: new ObjectId(id) }
+            const options = { upsert: true }
+            const updatedUser = {
+                $set: {
+                    name: user.name,
+                    email: user.email,
+                    number: user.number,
+                    date: user.date,
+                    description: user.description,
+
+                }
+            }
+            const result = await contactsCollection.updateOne(filter, updatedUser, options)
+            res.send(result)
+        })
+
+
 
 
         // Connect the client to the server	(optional starting in v4.7)
