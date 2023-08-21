@@ -4,11 +4,19 @@ const app = express()
 require('dotenv').config()
 const port = process.env.PORT || 5000
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const admin = require("firebase-admin");
+const serviceAccount = require("./serviceAccountKey.json");
+
+
 
 
 //middleware
 app.use(cors())
 app.use(express.json())
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+});
+
 
 
 
@@ -25,14 +33,83 @@ const client = new MongoClient(uri, {
 
 
 
-
-
 async function run() {
     try {
 
         const contactsCollection = client.db('contactsManagement').collection('contacts')
+        const sharedContactsCollection = client.db('contactsManagement').collection('sharedContacts')
 
 
+
+        app.post("/share-contacts", async (req, res) => {
+            try {
+                const { selectedContacts, selectedPermission } = req.body;
+
+                // Check if the "Authorization" header exists in the request
+                if (!req.headers.authorization) {
+                    return res.status(401).send("Unauthorized");
+                }
+
+                // Extract the ID token from the "Authorization" header
+                const idToken = req.headers.authorization.replace("Bearer ", "");
+
+                // Verify the Firebase ID token
+                const decodedToken = await admin.auth().verifyIdToken(idToken);
+                const uid = decodedToken.uid;
+
+                // Fetch selected contacts from the database
+                const contactsToShare = await contactsCollection
+                    .find({
+                        _id: { $in: selectedContacts.map(contactId => new ObjectId(contactId)) }
+                    })
+                    .toArray();
+
+                // Create shared contact entries for each selected contact
+                const sharedContacts = contactsToShare.map(contact => ({
+                    contactId: contact._id,
+                    sharedBy: uid, // Use the UID from the decoded token
+                    permissions: selectedPermission
+                }));
+
+                // Insert sharedContacts into the shared contacts collection
+                await sharedContactsCollection.insertMany(sharedContacts);
+
+                res.status(201).send("Contacts shared successfully");
+            } catch (error) {
+                console.error("Error sharing contacts:", error);
+                res.status(500).send("Internal server error");
+            }
+        });
+        // app.post("/share-contacts", async (req, res) => {
+        //     try {
+        //         const { selectedContacts, selectedPermission } = req.body;
+        //         // Assuming you're using req.user.id for sharedBy
+        //         const sharedBy = req.user ? req.user.id : null; // Make sure req.user.id is accessible
+        //         console.log(req.user);
+
+        //         // Fetch selected contacts from the database
+        //         const contactsToShare = await contactsCollection
+        //             .find({
+        //                 _id: { $in: selectedContacts.map(contactId => new ObjectId(contactId)) }
+        //             })
+        //             .toArray();
+
+        //         // Create shared contact entries for each selected contact
+        //         const sharedContacts = contactsToShare.map(contact => ({
+        //             contactId: contact._id,
+        //             sharedBy,
+        //             permissions: selectedPermission
+        //         }));
+
+        //         // Insert sharedContacts into the shared contacts collection
+        //         await sharedContactsCollection.insertMany(sharedContacts);
+
+        //         res.status(201).send("Contacts shared successfully");
+        //     } catch (error) {
+        //         console.error("Error sharing contacts:", error);
+        //         res.status(500).send("Internal server error");
+        //     }
+        // });
 
 
 
