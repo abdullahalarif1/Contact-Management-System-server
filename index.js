@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const app = express()
+const jwt = require('jsonwebtoken')
 require('dotenv').config()
 const port = process.env.PORT || 5000
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
@@ -16,6 +17,26 @@ app.use(express.json())
 admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
 });
+
+
+// verify jwt
+const verifyJWT = (req, res, next) => {
+    const authorization = req.headers.authorization;
+    if (!authorization) {
+        return res.status(401).send({ error: true, message: 'unauthorized access' });
+    }
+    // bearer token
+    const token = authorization.split(' ')[1];
+
+    jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+        if (err) {
+            return res.status(401).send({ error: true, message: 'unauthorized access' })
+        }
+        req.decoded = decoded;
+        next();
+    })
+}
+
 
 
 
@@ -40,7 +61,22 @@ async function run() {
         const sharedContactsCollection = client.db('contactsManagement').collection('sharedContacts')
 
 
-        app.get("/share-contacts", async (req, res) => {
+        //jwt
+        app.post('/jwt', (req, res) => {
+            const user = req.body
+            console.log(user);
+            const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+                expiresIn: '1h'
+            })
+            res.send({ token })
+
+        })
+
+
+
+
+        // shared contacts
+        app.get("/shared-contacts", async (req, res) => {
             try {
                 if (!req.headers.authorization) {
                     return res.status(401).send("Unauthorized");
@@ -59,6 +95,82 @@ async function run() {
                 res.status(200).json(sharedContacts);
             } catch (error) {
                 console.error("Error fetching shared contacts:", error);
+                res.status(500).send("Internal server error");
+            }
+        });
+
+        // Endpoint to modify permission for a shared contact
+        app.put("/shared-contacts/:id", async (req, res) => {
+            try {
+                const contactId = req.params.id;
+                const { permissions } = req.body;
+
+                // Verify the Firebase ID token
+                const idToken = req.headers.authorization.replace("Bearer ", "");
+                const decodedToken = await admin.auth().verifyIdToken(idToken);
+                const uid = decodedToken.uid;
+
+                // Update permissions for the shared contact
+                await sharedContactsCollection.updateOne(
+                    { _id: new ObjectId(contactId), uid: uid },
+                    { $set: { permissions } }
+                );
+
+                res.status(200).send("Permission modified successfully");
+            } catch (error) {
+                console.error("Error modifying permission:", error);
+                res.status(500).send("Internal server error");
+            }
+        });
+
+
+        // Endpoint to revoke permission for a shared contact
+        app.delete("/shared-contacts/:id", async (req, res) => {
+            try {
+                const contactId = req.params.id;
+
+                // Verify the Firebase ID token
+                const idToken = req.headers.authorization.replace("Bearer ", "");
+                const decodedToken = await admin.auth().verifyIdToken(idToken);
+                const uid = decodedToken.uid;
+
+                // Remove the shared contact entry
+                await sharedContactsCollection.deleteOne({
+                    _id: new ObjectId(contactId),
+                    uid: uid,
+                });
+
+                res.status(200).send("Permission revoked successfully");
+            } catch (error) {
+                console.error("Error revoking permission:", error);
+                res.status(500).send("Internal server error");
+            }
+        });
+
+        app.get("/shared-contacts/:id", async (req, res) => {
+            try {
+                const contactId = req.params.id;
+
+                // Extract the ID token from the "Authorization" header
+                const idToken = req.headers.authorization.replace("Bearer ", "");
+
+                // Verify the Firebase ID token
+                const decodedToken = await admin.auth().verifyIdToken(idToken);
+                const uid = decodedToken.uid;
+
+                // Fetch the specific shared contact
+                const sharedContact = await sharedContactsCollection.findOne({
+                    _id: new ObjectId(contactId),
+                    uid: uid,
+                });
+
+                if (!sharedContact) {
+                    return res.status(404).send("Shared contact not found");
+                }
+
+                res.status(200).json(sharedContact);
+            } catch (error) {
+                console.error("Error fetching shared contact:", error);
                 res.status(500).send("Internal server error");
             }
         });
@@ -142,9 +254,13 @@ async function run() {
         })
 
         // specific email
-        app.get('/contacts/email/:email', async (req, res) => {
+        app.get('/contacts/email/:email', verifyJWT, async (req, res) => {
             const queryEmail = req.params.email;
             const query = { email: queryEmail };
+            const decodedEmail = req.decoded.email;
+            if (queryEmail !== decodedEmail) {
+                return res.status(401).send({ error: true, message: 'forbidden access' })
+            }
             const result = await contactsCollection.find(query).toArray();
             res.send(result);
         })
